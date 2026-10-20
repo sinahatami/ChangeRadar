@@ -1,21 +1,85 @@
 # ChangeRadar
 
-Local-first code change impact analysis using dependency-aware retrieval and RAG.
+**Local first code change impact analysis for Python repositories.** ChangeRadar
+helps developers trace a proposed change to likely target symbols, statically
+visible callers, source evidence, and focused regression test ideas.
 
-## Current scope
+It is a portfolio MVP: repository code is parsed but never executed, provider
+access is off unless explicitly enabled, and deterministic analysis works
+without API credentials.
 
-Phase 1 provides bounded, read-only intake for Python source, AST symbol and
-line extraction, and a conservative local import/call graph. Phase 2 adds
-symbol-level code chunks, lexical BM25-style ranking, optional local semantic
-ranking, dependency-aware hybrid ranking, and fixture-based retrieval
-evaluation. Phase 3 adds diff/change parsing, bounded evidence-grounded impact
-reports, validated analysis tools, and an optional OpenAI-compatible chat
-provider. Phase 4 provides a Streamlit interface for sample or ZIP repositories
-and evidence-linked reports. Repository code is parsed but never executed.
-External transmission is disabled by default.
+## Try it locally
 
-Semantic retrieval uses Sentence Transformers with `all-MiniLM-L6-v2` on CPU.
-It is optional and loaded lazily. Install the semantic extra only when needed:
+Python 3.10 or newer is required. From the repository root:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e ".[dev,ui]"
+streamlit run app.py
+```
+
+If the Streamlit file watcher reports optional `torchvision` import errors,
+the checked-in configuration disables file watching. The interface should open
+at the local URL printed by Streamlit.
+
+### Quick walkthrough
+
+1. Select **Included sample**.
+2. Keep **Lexical (offline)** as the retrieval method.
+3. Enter `Change validate_email_address to reject addresses without a domain after the @ symbol.`
+4. Click **Analyze change**.
+5. Review the direct target, retrieval-only context, suggested test idea, and
+   cited source lines. Download the JSON report if useful.
+
+The report labels deterministic output clearly. A retrieved match is shown as
+context unless direct targeting or a statically supported dependency link
+establishes an impact relationship. Retrieval scores are ranking signals, not
+probabilities. Suggested tests are ideas; ChangeRadar does not create or run them.
+
+## What it does
+
+- Reads Python source from a bundled sample or a ZIP upload using bounded,
+  path-checked intake. ZIP files are inspected in memory and never extracted.
+- Parses symbols, source ranges, imports, and statically named calls with Python's
+  AST. It never imports or executes analyzed repository code.
+- Ranks code with lexical, optional local semantic, or hybrid retrieval.
+- Builds an evidence-linked report with direct targets, dependency-linked
+  candidates, retrieval-only context, uncertainties, and regression test ideas.
+- Optionally calls an OpenAI-compatible chat-completions endpoint after both
+  per-analysis consent and environment opt-in.
+
+## Architecture
+
+```mermaid
+flowchart LR
+    A[Sample repository or ZIP] --> B[Safe intake]
+    B --> C[Python AST parser]
+    C --> D[Dependency graph]
+    C --> E[Code chunks]
+    D --> F[Impact workflow]
+    E --> G[Lexical / semantic / hybrid retrieval]
+    G --> F
+    F --> H[Evidence-validated impact report]
+    H --> I[Streamlit UI / JSON download]
+    F -. explicit opt-in only .-> J[Optional external LLM]
+```
+
+The main boundaries are small Python modules: intake, parsing, dependency
+analysis, retrieval, report models, bounded tools, provider adapter, impact
+workflow, and Streamlit presentation. The UI reuses the same analysis workflow
+as the command-line demo and evaluation script.
+
+## Retrieval
+
+Lexical retrieval is the default and requires no model, API key, or network.
+Semantic retrieval uses Sentence Transformers with
+`all-MiniLM-L6-v2` on CPU. Hybrid retrieval combines lexical and semantic
+signals and can include dependency relationships. If semantic dependencies or
+model weights are unavailable, retrieval falls back to lexical ranking and
+reports that fallback.
+
+Install the optional semantic dependencies when you want to try those modes:
 
 ```bash
 python -m pip install --index-url https://download.pytorch.org/whl/cpu torch
@@ -23,162 +87,110 @@ python -m pip install -e ".[semantic]"
 python scripts/smoke_semantic.py
 ```
 
-The first command installs a CPU-only PyTorch build to avoid pulling GPU
-libraries onto CPU-only machines. The smoke test checks that the model loaded,
-semantic retrieval was used, and result paths and line ranges are valid. Its
-first run may download model weights. Automated tests never download the model.
-Without the optional package or usable model, semantic and hybrid requests
-report a warning and return lexical fallback rankings.
+The first model use may download weights. Automated tests and the default
+application flow do not download a model.
 
-## Development and tests
+## Evaluation
 
-Python 3.10 or newer is required. Create and activate a virtual environment,
-then install development tools and run quality checks and tests:
+The retrieval fixture has five labeled queries. It computes Recall@5 and mean
+reciprocal rank (MRR) from actual ranked results for lexical, semantic, and
+hybrid retrieval. The impact fixture has three labeled change cases and checks
+direct-target and dependency-candidate precision/recall/F1, context false
+impacts, evidence references, test-idea markers, and ambiguity disclosure.
+These small fixture sets are useful regression checks, not general accuracy
+claims.
 
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python3 -m pip install -e ".[dev]"
-pre-commit install
-pre-commit run --all-files
-ruff check .
-ruff format --check .
-python3 -m pytest
-git diff --check
-```
-
-## Retrieval evaluation
-
-The labeled fixture set has five representative questions and expected symbol
-IDs. The script builds chunks and rankings from the fixture source and computes
-mean Recall@5 and MRR from those ranked results. It reports the effective
-retrieval method so an unavailable semantic model is visible as lexical
-fallback, rather than being presented as semantic performance.
-
-Run the offline evaluation (no model or API required):
+Run offline evaluation without credentials or model downloads:
 
 ```bash
-python3 -m pip install -e ".[dev]"
-python3 scripts/evaluate_retrieval.py
-```
-
-To evaluate with the actual local semantic model after installing the optional
-extra (the weights may download on first use):
-
-```bash
-python3 -m pip install -e ".[semantic]"
-python3 scripts/evaluate_retrieval.py --semantic
-```
-
-## Impact report evaluation
-
-The impact evaluator runs the deterministic workflow against three labeled change
-cases covering a direct email-validation target, an ambiguous zero-rate boundary,
-and a dependency-linked token decoder caller. It computes direct-target,
-dependency-candidate, and overall impact precision/recall/F1; reports whether
-selected context-only negatives were mislabeled as impact; and checks expected
-markers in test ideas, ambiguity disclosure, and source-reference validity.
-These are fixture checks, not a broad estimate of production accuracy. Test-idea
-marker coverage checks the labeled wording and does not execute generated tests.
-
-Run the evaluation with lexical retrieval, no model, credentials, or network:
-
-```bash
+python scripts/evaluate_retrieval.py
 python scripts/evaluate_impact.py
 ```
 
-Semantic and hybrid report evaluations are optional and use the local embedding
-model:
+After installing and caching the semantic model, evaluate that path with:
 
 ```bash
+python scripts/evaluate_retrieval.py --semantic
 python scripts/evaluate_impact.py --method hybrid
 ```
 
-## Phase 3: impact analysis demonstration
+## Optional external LLM
 
-After installing the development extra, run a deterministic local analysis on
-the included sample repository:
-
-```bash
-python scripts/demo_impact.py tests/fixtures/retrieval_repo \
-  "Change calculate_tax rounding for zero tax rates"
-```
-
-The JSON report includes impacted symbols, test ideas, evidence IDs, and
-verified relative paths and line ranges. It uses the deterministic report when
-no provider is enabled. Tool access is restricted to already scanned source;
-no analyzed code is executed.
-
-The optional OpenAI-compatible adapter uses the following environment
-variables, with no provider or paid service selected by default:
+No provider is selected by default. To use an OpenAI-compatible endpoint,
+configure credentials in your shell and explicitly opt in in the UI (or pass
+`--allow-external` to the demo script):
 
 ```bash
 export CHANGERADAR_ALLOW_EXTERNAL_CODE=true
 export CHANGERADAR_LLM_ENDPOINT="https://your-provider.example/v1/chat/completions"
 export CHANGERADAR_LLM_MODEL="your-model-name"
 export CHANGERADAR_API_KEY="your-api-key"
+```
+
+External analysis can send the proposed change and bounded, redacted evidence
+snippets. Review that content before enabling transmission. A ChatGPT
+subscription does not itself provide API credentials or credits. Provider
+failures return a labeled deterministic report. Live provider behavior has not
+been verified.
+
+## Safety and privacy
+
+- Repository code is treated as untrusted data and is never executed.
+- Uploads are limited to 30 MB, 1,000 source files, 1 MB per file, and 20 MB
+  of total source. Only supported Python source is analyzed; virtual
+  environments, generated files, and dependency directories are skipped.
+- Repository source stays local unless the user explicitly enables a configured
+  external provider. Model downloads contain model files, not repository code.
+- API keys and local environment files should remain in environment variables
+  or ignored local files, never in commits.
+
+Secret redaction covers common key, token, password, bearer, and private-key
+patterns. It is best effort and cannot detect every secret in source. Inspect
+evidence before opting into external transmission.
+
+## Development
+
+Install the development tools, set up hooks, and run the checks:
+
+```bash
+python -m pip install -e ".[dev,ui]"
+pre-commit install
+pre-commit run --all-files
+ruff check .
+ruff format --check .
+python -m pytest
+git diff --check
+```
+
+Tests use fake providers and local fixtures. They do not call an external LLM
+or download embedding models. The Streamlit integration test runs when the UI
+extra is installed.
+
+For a deterministic command-line demonstration:
+
+```bash
 python scripts/demo_impact.py tests/fixtures/retrieval_repo \
-  "Change calculate_tax rounding for zero tax rates" --allow-external
+  "Change validate_email_address to reject addresses without a domain after the @ symbol."
 ```
 
-Enabling the flag and environment opt-in permits transmission of the change
-text and bounded, redacted evidence snippets. API credentials and any API
-credits are separate from a ChatGPT subscription. If the provider is missing,
-unavailable, rate-limited, returns malformed output, or cannot handle the tool
-interface, the workflow returns its labeled deterministic report.
+## Limitations and next steps
 
-Credential redaction covers common key, token, password, bearer, and private-key
-patterns. It is a best-effort filter and cannot guarantee detection of every
-secret embedded in source; inspect the evidence and configure provider access
-accordingly before opting in to external transmission.
+Static analysis can miss dynamic dispatch, reflection, generated code, and
+dependencies outside the scanned Python files. Retrieval and impact evaluations
+use small hand-labeled fixtures. Test ideas are not implemented or executed,
+and LLM integration has not been tested against a live service.
 
-## Phase 4: Streamlit application
+### Streamlit Community Cloud
 
-Install the optional UI extra in the project environment:
+The root `requirements.txt` installs the project and pins the tested Streamlit
+version. The default deployment uses lexical retrieval and needs no model
+download, LLM credential, or secret. To deploy, push this project to GitHub,
+open Streamlit Community Cloud, connect the GitHub repository, and select
+`main` with `app.py` as the entry point. Choose Python 3.12 in Advanced
+settings, or another supported version that you have tested. Private
+repositories require granting Community Cloud access to the repository.
 
-```bash
-python -m pip install -e ".[ui]"
-```
-
-Launch the local interface:
-
-```bash
-streamlit run app.py
-```
-
-For a quick demonstration, select **Included sample**, keep **Lexical
-(offline)** selected, enter `Change calculate_tax rounding for zero tax rates`,
-and click **Analyze change**. The report shows ranked symbols, heuristic
-retrieval scores, source evidence with exact line ranges, test ideas, and
-uncertainties. Use **Upload a ZIP** to analyze another repository; only Python
-files are read, ZIP paths are validated, and the existing intake limits apply
-(30 MB upload, 1,000 source files, 1 MB per file, 20 MB total source). ZIPs are
-read in memory and never extracted or executed.
-
-Lexical retrieval works offline and is the default. Semantic and hybrid choices
-use the optional `all-MiniLM-L6-v2` model; first use may download model weights.
-The model download does not contain repository source. A semantic failure falls
-back to lexical retrieval and is identified in the report.
-
-The LLM checkbox starts unchecked. External analysis requires both that
-per-analysis consent and the provider configuration described above, including
-`CHANGERADAR_ALLOW_EXTERNAL_CODE=true`. When enabled, only the proposed change
-and bounded, redacted retrieved evidence are sent. Without this setup, the
-interface remains fully usable and clearly labels its deterministic report.
-Reports can be downloaded as JSON.
-
-## Architecture and limitations
-
-The UI calls `scan_directory` for the bundled sample and `scan_zip` for uploads,
-then reuses the Python AST parser, dependency graph, code chunk builder,
-retriever, `ImpactWorkflow`, and `ImpactReport`. The UI does not accept server
-filesystem paths or execute analyzed code. Integration and failure tests
-exercise the public helpers without requiring Streamlit. When the UI extra is
-installed, an additional AppTest verifies the rendered sample-analysis flow.
-Tests use no network access and do not download a model.
-
-Static dependency analysis can miss dynamic dispatch, reflection, generated
-code, and dependencies outside the included Python source. Ranking scores are
-heuristics rather than probabilities. Test suggestions are not executed, and
-the evaluation set is small. External provider behavior has not been verified
-against a live service; deterministic local analysis remains available.
+Before sharing a public instance, decide how to handle anonymous ZIP uploads,
+usage limits, retention, and external provider consent. Do not add provider
+credentials unless you intend to enable external analysis. The local app and
+test suite do not verify a live Community Cloud deployment.

@@ -86,22 +86,39 @@ def report_json(report: ImpactReport) -> str:
     return json.dumps(report.to_dict(), ensure_ascii=False, indent=2)
 
 
+def _configure_page(st) -> None:
+    """Set the page layout and high-contrast report metric styles."""
+    st.set_page_config(page_title="ChangeRadar", page_icon="🧭", layout="wide")
+    st.markdown(
+        """
+        <style>
+        .block-container {max-width: 1180px; padding-top: 2.2rem; padding-bottom: 4rem;}
+        [data-testid="stMetric"] {
+            background: #f2f6fa;
+            color: #172b4d !important;
+            padding: 1rem;
+            border: 1px solid #d8e1eb;
+            border-radius: .75rem;
+        }
+        [data-testid="stMetric"] label,
+        [data-testid="stMetricLabel"],
+        [data-testid="stMetricValue"],
+        [data-testid="stMetricDelta"] {
+            color: #172b4d !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def main() -> None:
     try:
         import streamlit as st
     except ImportError as exc:
         raise SystemExit('Install the UI extra with: python -m pip install -e ".[ui]"') from exc
 
-    st.set_page_config(page_title="ChangeRadar", page_icon="🧭", layout="wide")
-    st.markdown(
-        """
-        <style>
-        .block-container {max-width: 1180px; padding-top: 2.2rem; padding-bottom: 4rem;}
-        [data-testid="stMetric"] {background: #f4f7fb; padding: 1rem; border-radius: .75rem;}
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
+    _configure_page(st)
 
     st.title("🧭 ChangeRadar")
     st.subheader("Understand the likely impact of a code change")
