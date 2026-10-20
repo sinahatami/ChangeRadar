@@ -1,8 +1,8 @@
 # ChangeRadar contributor instructions
 
 - ChangeRadar is a local-first AI Codebase Impact Analyst.
-- Implemented: Phase 1 source scanning and dependency analysis; Phase 2 lexical, semantic, and hybrid retrieval with evaluation; Phase 3 evidence-grounded RAG and bounded tool workflow.
-- Do not start the Streamlit UI or deployment phase without an explicit request.
+- Implemented: Phase 1 source scanning and dependency analysis; Phase 2 lexical, semantic, and hybrid retrieval with evaluation; Phase 3 evidence-grounded RAG and bounded tool workflow; Phase 4 Streamlit UI.
+- Do not start deployment work without an explicit request.
 - Keep the application lightweight and suitable for an 8 GB RAM laptop.
 - Never execute code from analyzed repositories.
 - Never transmit repository contents externally unless explicitly enabled by the user.

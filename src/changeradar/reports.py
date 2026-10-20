@@ -25,6 +25,11 @@ class ImpactCandidate:
     evidence_ids: list[str]
     retrieval_score: float | None = None
     unsupported: bool = False
+    classification: str = "context_only"
+    location_evidence_ids: list[str] = field(default_factory=list)
+    relationship_evidence_ids: list[str] = field(default_factory=list)
+    impact_basis: str = "retrieval_relevance"
+    related_symbols: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -33,6 +38,9 @@ class RegressionTestSuggestion:
     behavior: str
     evidence_ids: list[str]
     unsupported: bool = False
+    target_symbol: str = ""
+    classification: str = "direct_target"
+    status: str = "suggested_not_implemented_or_executed"
 
 
 @dataclass
@@ -46,6 +54,9 @@ class ImpactReport:
     uncertainties: list[str] = field(default_factory=list)
     unsupported_claims: list[str] = field(default_factory=list)
     mode: str = "deterministic"
+    retrieval_method: str = "hybrid"
+    effective_retrieval_method: str = "hybrid"
+    context_items: list[ImpactCandidate] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

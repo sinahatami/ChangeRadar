@@ -23,12 +23,16 @@ class ToolRegistry:
         analysis: Analysis,
         retriever: CodeRetriever,
         max_calls: int = 12,
+        retrieval_method: str = "hybrid",
     ) -> None:
+        if retrieval_method not in {"lexical", "semantic", "hybrid"}:
+            raise ValueError("retrieval_method must be lexical, semantic, or hybrid")
         self.sources = {source.path: source for source in sources}
         self.parsed_files = parsed_files
         self.chunks = {chunk.chunk_id: chunk for chunk in chunks}
         self.analysis = analysis
         self.retriever = retriever
+        self.retrieval_method = retrieval_method
         self.max_calls = max_calls
         self.calls = 0
         self._tools: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
@@ -57,7 +61,7 @@ class ToolRegistry:
         return [
             _tool_schema(
                 "search_code",
-                "Search analyzed source code using local hybrid retrieval.",
+                "Search analyzed source code using the configured local retrieval method.",
                 {
                     "query": _string_schema(),
                     "top_k": {"type": "integer", "minimum": 1, "maximum": 10},
@@ -97,7 +101,7 @@ class ToolRegistry:
         top_k = args.get("top_k", 5)
         if type(top_k) is not int or not 1 <= top_k <= 10:
             raise ToolArgumentError("top_k must be an integer from 1 to 10")
-        response = self.retriever.retrieve(query, method="hybrid", top_k=top_k)
+        response = self.retriever.retrieve(query, method=self.retrieval_method, top_k=top_k)
         return {
             "effective_method": response.effective_method,
             "warning": response.warning,
@@ -168,7 +172,7 @@ class ToolRegistry:
         if any(not isinstance(item, str) or item not in known for item in changed):
             raise ToolArgumentError("changed_symbols must contain only known symbols")
         response = self.retriever.retrieve(
-            query, method="hybrid", top_k=10, changed_symbols=set(changed)
+            query, method=self.retrieval_method, top_k=10, changed_symbols=set(changed)
         )
         return {
             "effective_method": response.effective_method,

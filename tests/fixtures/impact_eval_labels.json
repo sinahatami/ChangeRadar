@@ -1,0 +1,35 @@
+[
+  {
+    "id": "email_missing_domain",
+    "change": "Change validate_email_address to reject addresses without a domain after the @ symbol.",
+    "expected_direct": ["misc.py::validate_email_address"],
+    "expected_dependency_linked": [],
+    "expected_context_only": [
+      "auth.py::validate_access_token",
+      "auth.py::parse_bearer_header"
+    ],
+    "expected_test_markers": ["address=\"local@\"", "`False`"],
+    "expected_ambiguous": false
+  },
+  {
+    "id": "zero_tax_rate_ambiguous_result",
+    "change": "Change calculate_tax to handle zero tax rates without rounding errors.",
+    "expected_direct": ["billing.py::calculate_tax"],
+    "expected_dependency_linked": [],
+    "expected_context_only": [
+      "billing.py::apply_discount",
+      "misc.py::apply_coupon_code"
+    ],
+    "expected_test_markers": ["tax_rate=0", "expected return value and type"],
+    "expected_ambiguous": true
+  },
+  {
+    "id": "decode_token_caller_dependency",
+    "change": "Change decode_token to return None when the token is empty.",
+    "expected_direct": ["auth.py::decode_token"],
+    "expected_dependency_linked": ["auth.py::validate_access_token"],
+    "expected_context_only": ["auth.py::parse_bearer_header"],
+    "expected_test_markers": ["return None"],
+    "expected_ambiguous": false
+  }
+]

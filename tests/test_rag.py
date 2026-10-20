@@ -5,6 +5,7 @@ from io import BytesIO
 import pytest
 
 from changeradar.graph import build_analysis
+from changeradar.intake import scan_directory
 from changeradar.llm import (
     AssistantTurn,
     OpenAICompatibleProvider,
@@ -98,6 +99,146 @@ def test_end_to_end_deterministic_rag_has_real_paths_lines_and_test_ideas():
     assert any(
         item.kind == "dependency" and "calculate_tax" in item.text for item in references.values()
     )
+    assert report.suggested_tests[0].classification == "direct_target"
+    assert report.suggested_tests[0].status == "suggested_not_implemented_or_executed"
+
+
+def test_billing_change_keeps_retrieved_authentication_and_email_as_context_only():
+    sources = scan_directory("tests/fixtures/retrieval_repo")
+    source_map = {source.path: source.content for source in sources}
+    parsed = [parse_source(source) for source in sources]
+    analysis = build_analysis(parsed)
+    chunks = build_code_chunks(sources, parsed)
+    retriever = CodeRetriever(chunks, analysis=analysis, encoder=StubEncoder())
+    workflow = ImpactWorkflow(sources, parsed, analysis, chunks, retriever)
+
+    report = workflow.analyze(
+        "Change calculate_tax rounding; review bearer tokens, token expiry, "
+        "and email address validation for context"
+    )
+
+    direct = {(item.path, item.symbol) for item in report.affected_items}
+    context = {(item.path, item.symbol) for item in report.context_items}
+    assert ("billing.py", "calculate_tax") in direct
+    for identity in (
+        ("auth.py", "parse_bearer_header"),
+        ("auth.py", "validate_access_token"),
+        ("misc.py", "validate_email_address"),
+    ):
+        assert identity not in direct
+        assert identity in context
+    assert all(item.classification == "context_only" for item in report.context_items)
+    assert not any(
+        item.target_symbol
+        in {"parse_bearer_header", "validate_access_token", "validate_email_address"}
+        for item in report.suggested_tests
+    )
+    assert all(item.path in source_map for item in report.evidence)
+    assert "1 directly targeted symbol(s)" in report.summary
+    assert f"{len(report.context_items)} retrieval-only context symbol(s)" in report.summary
+
+
+def test_callers_are_dependency_candidates_only_with_callsite_evidence():
+    workflow, _, _, _, _, _ = make_workflow(
+        {
+            "billing.py": "def calculate_tax(amount):\n    return round(amount, 2)\n",
+            "checkout.py": (
+                "from billing import calculate_tax\n\n"
+                "def build_invoice(amount):\n    return calculate_tax(amount)\n"
+            ),
+        }
+    )
+    report = workflow.analyze("Change calculate_tax to return a Decimal for every amount")
+    caller = next(item for item in report.affected_items if item.symbol == "build_invoice")
+    assert caller.classification == "dependency_linked"
+    assert caller.location_evidence_ids
+    assert caller.relationship_evidence_ids
+    references = {item.evidence_id: item for item in report.evidence}
+    assert all(references[item].kind == "source" for item in caller.location_evidence_ids)
+    assert all(references[item].kind == "dependency" for item in caller.relationship_evidence_ids)
+    assert any(
+        suggestion.target_symbol == "build_invoice"
+        and suggestion.classification == "dependency_linked"
+        for suggestion in report.suggested_tests
+    )
+
+
+def test_ambiguous_change_reports_contract_gap_without_inventing_expected_result():
+    workflow, *_ = make_workflow(
+        {
+            "billing.py": (
+                "def calculate_tax(subtotal, tax_rate):\n    return round(subtotal * tax_rate, 2)\n"
+            )
+        }
+    )
+    report = workflow.analyze(
+        "Change calculate_tax to handle zero tax rates without rounding errors"
+    )
+    assert any("lacks an explicit expected result" in text for text in report.uncertainties)
+    assert report.suggested_tests
+    direct_idea = next(
+        item for item in report.suggested_tests if item.classification == "direct_target"
+    )
+    assert "tax_rate=0" in direct_idea.behavior
+    assert "expected return value and type" in direct_idea.behavior
+    assert "returns 0" not in direct_idea.behavior
+    assert "returns 0.0" not in direct_idea.behavior
+    assert all(
+        item.status == "suggested_not_implemented_or_executed" for item in report.suggested_tests
+    )
+
+
+def test_boundary_test_idea_uses_signature_without_tax_specific_logic():
+    workflow, *_ = make_workflow(
+        {"math_ops.py": "def scale(value, factor):\n    return value * factor\n"}
+    )
+    report = workflow.analyze("Change scale to handle zero values without overflow")
+    suggestion = report.suggested_tests[0]
+    assert "value=0" in suggestion.behavior
+    assert "expected return value and type" in suggestion.behavior
+    assert "tax" not in suggestion.behavior.lower()
+
+
+def test_reject_without_requirement_suggests_concrete_missing_domain_case():
+    sources = scan_directory("tests/fixtures/retrieval_repo")
+    parsed = [parse_source(source) for source in sources]
+    analysis = build_analysis(parsed)
+    chunks = build_code_chunks(sources, parsed)
+    retriever = CodeRetriever(chunks, analysis=analysis, encoder=StubEncoder())
+    workflow = ImpactWorkflow(sources, parsed, analysis, chunks, retriever)
+
+    report = workflow.analyze(
+        "Change validate_email_address to reject addresses without a domain after the @ symbol."
+    )
+
+    suggestion = next(
+        item for item in report.suggested_tests if item.classification == "direct_target"
+    )
+    assert 'address="local@"' in suggestion.behavior
+    assert "result is `False`" in suggestion.behavior
+    assert "other address validation rules remain unspecified" in suggestion.behavior
+    assert ".." not in suggestion.behavior
+    assert suggestion.status == "suggested_not_implemented_or_executed"
+
+
+def test_report_summary_counts_direct_dependency_and_context_categories():
+    workflow, *_ = make_workflow(
+        {
+            "billing.py": "def calculate_tax(amount):\n    return round(amount, 2)\n",
+            "checkout.py": (
+                "from billing import calculate_tax\n\n"
+                "def build_invoice(amount):\n    return calculate_tax(amount)\n"
+            ),
+            "mail.py": "def send_email(address):\n    return address\n",
+        }
+    )
+    report = workflow.analyze("Change calculate_tax rounding and review email delivery")
+    assert sum(item.classification == "direct_target" for item in report.affected_items) == 1
+    assert sum(item.classification == "dependency_linked" for item in report.affected_items) == 1
+    assert sum(item.classification == "context_only" for item in report.context_items) == 1
+    assert "1 directly targeted symbol(s)" in report.summary
+    assert "1 dependency-linked candidate(s)" in report.summary
+    assert "1 retrieval-only context symbol(s)" in report.summary
 
 
 def test_unified_diff_identifies_changed_file_lines_and_symbol():
@@ -143,7 +284,7 @@ def test_llm_citations_are_checked_and_display_locations_come_from_evidence():
     assert "../../invented.py" not in json.dumps(report.to_dict())
 
 
-def test_invalid_evidence_citation_is_flagged_and_not_rendered():
+def test_invalid_evidence_citation_is_flagged_without_erasing_local_classification():
     response = {
         "summary": "Unsupported statement.",
         "summary_evidence_ids": ["forged-id"],
@@ -161,9 +302,64 @@ def test_invalid_evidence_citation_is_flagged_and_not_rendered():
     workflow, *_ = make_workflow(provider=provider, allow_external=True)
     report = workflow.analyze("Change calculate_tax rounding")
     assert report.mode == "llm"
-    assert not report.affected_items
+    assert any(
+        item.symbol == "calculate_tax" and item.classification == "direct_target"
+        for item in report.affected_items
+    )
     assert report.unsupported_claims
     assert "forged-id" not in {item.evidence_id for item in report.evidence}
+    assert all(item.path in CODE for item in report.affected_items)
+
+
+def test_llm_cannot_promote_retrieval_only_context_to_impact():
+    class ContextPromotionProvider:
+        def complete(self, messages, tools):
+            request = json.loads(messages[-1]["content"])
+            evidence = request["evidence"]
+            context = next(item for item in evidence if item["path"] == "auth.py")
+            return AssistantTurn(
+                json.dumps(
+                    {
+                        "summary": "Authentication is impacted.",
+                        "summary_evidence_ids": [context["evidence_id"]],
+                        "affected_items": [
+                            {
+                                "symbol": context["symbol"],
+                                "explanation": "The change affects authentication.",
+                                "evidence_ids": [context["evidence_id"]],
+                            }
+                        ],
+                        "suggested_tests": [],
+                        "uncertainties": [],
+                    }
+                ),
+                [],
+            )
+
+    sources = scan_directory("tests/fixtures/retrieval_repo")
+    parsed = [parse_source(source) for source in sources]
+    analysis = build_analysis(parsed)
+    chunks = build_code_chunks(sources, parsed)
+    retriever = CodeRetriever(chunks, analysis=analysis, encoder=StubEncoder())
+    workflow = ImpactWorkflow(
+        sources,
+        parsed,
+        analysis,
+        chunks,
+        retriever,
+        provider=ContextPromotionProvider(),
+        allow_external=True,
+    )
+    report = workflow.analyze(
+        "Change calculate_tax rounding; review bearer token expiry for context"
+    )
+
+    assert report.mode == "llm"
+    assert not any(item.path == "auth.py" for item in report.affected_items)
+    assert any(item.path == "auth.py" for item in report.context_items)
+    assert any(
+        "not a direct or dependency-linked candidate" in text for text in report.unsupported_claims
+    )
 
 
 def test_invalid_provider_json_returns_deterministic_fallback():

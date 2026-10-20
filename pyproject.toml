@@ -12,6 +12,7 @@ dependencies = []
 [project.optional-dependencies]
 dev = ["pre-commit>=4.3,<5", "pytest>=8.3,<10", "ruff>=0.16,<0.17"]
 semantic = ["sentence-transformers>=3,<6"]
+ui = ["streamlit>=1.40,<2"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
