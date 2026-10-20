@@ -218,6 +218,21 @@ tempCodeRunnerFile.py
 .aws/
 .ssh/
 
+# Local coding-agent state and instructions (kept local, not published)
+/.agents/
+/.codex/
+/AGENTS.md
+
+# Local embedding model downloads
+/models/
+/model_cache/
+/hf_cache/
+*.safetensors
+*.ckpt
+*.pth
+*.pt
+pytorch_model*.bin
+
 # Marimo
 marimo/_static/
 marimo/_lsp/

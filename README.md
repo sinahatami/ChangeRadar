@@ -16,7 +16,7 @@ Python 3.10 or newer is required. From the repository root:
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -e ".[dev,ui]"
-streamlit run app.py
+streamlit run app.py --server.address 127.0.0.1
 ```
 
 If the Streamlit file watcher reports optional `torchvision` import errors,
