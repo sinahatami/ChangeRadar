@@ -2,6 +2,7 @@
 address = "127.0.0.1"
 maxUploadSize = 30
 headless = true
+fileWatcherType = "none"
 
 [browser]
 gatherUsageStats = false
