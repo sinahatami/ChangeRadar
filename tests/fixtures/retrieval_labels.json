@@ -1,0 +1,22 @@
+[
+  {
+    "query": "reject expired access token using expiry claim",
+    "relevant": ["auth.py::validate_access_token"]
+  },
+  {
+    "query": "extract bearer token from authorization header",
+    "relevant": ["auth.py::parse_bearer_header"]
+  },
+  {
+    "query": "compute sales tax on subtotal and tax rate",
+    "relevant": ["billing.py::calculate_tax"]
+  },
+  {
+    "query": "apply percent discount and clamp negative total",
+    "relevant": ["billing.py::apply_discount"]
+  },
+  {
+    "query": "load user record from storage by identifier",
+    "relevant": ["storage.py::load_user_record"]
+  }
+]
